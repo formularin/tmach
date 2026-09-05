@@ -459,6 +459,39 @@ def read_key() -> str:
     return char.lower()
 
 
+def _steps(count: int) -> str:
+    return f"{count} step" if count == 1 else f"{count} steps"
+
+
+def advance(machine: Machine, history: list, index: int, rate: int) -> tuple:
+    """Play `rate` steps forward, extending the history as needed."""
+    played = 0
+    while played < rate:
+        if index + 1 == len(history):
+            nxt = step(machine, history[index])
+            if nxt is None:
+                break
+            history.append(nxt)
+        index += 1
+        played += 1
+
+    if played == 0:
+        return index, "the machine has halted; there is no next configuration."
+    if played < rate:
+        return index, f"played {_steps(played)}, then the machine halted."
+    return index, ""
+
+
+def rewind(index: int, rate: int) -> tuple:
+    """Rewind `rate` steps, stopping at the initial configuration."""
+    if index == 0:
+        return index, "already at the initial configuration."
+    rewound = min(rate, index)
+    if rewound < rate:
+        return 0, f"rewound {_steps(rewound)} to the initial configuration."
+    return index - rewound, ""
+
+
 def terminal_cells(label_w: int) -> int:
     columns = shutil.get_terminal_size((80, 24)).columns
     return max(4, (columns - label_w - 12) // 4)
@@ -467,6 +500,7 @@ def terminal_cells(label_w: int) -> int:
 def run(machine: Machine, input_string: str) -> None:
     history = [initial_config(machine, input_string)]
     index = 0
+    rate = 1  # how many steps "n" and "p" play at a time
     message = ""
     interactive = sys.stdin.isatty()
     label_w = len(f"tape {machine.num_tapes}")
@@ -479,7 +513,11 @@ def run(machine: Machine, input_string: str) -> None:
         if message:
             print(message)
         message = ""
-        print("\n[n]ext  [p]revious  [q]uit > ", end="", flush=True)
+        print(
+            f"\n[n]ext  [p]revious  [f]aster  [s]lower  [q]uit   (rate: {_steps(rate)}) > ",
+            end="",
+            flush=True,
+        )
 
         try:
             key = read_key()
@@ -492,22 +530,20 @@ def run(machine: Machine, input_string: str) -> None:
             print("bye.")
             return
         if key == "n":
-            if index + 1 < len(history):
-                index += 1
-            else:
-                nxt = step(machine, config)
-                if nxt is None:
-                    message = "the machine has halted; there is no next configuration."
-                else:
-                    history.append(nxt)
-                    index += 1
+            index, message = advance(machine, history, index, rate)
         elif key == "p":
-            if index == 0:
-                message = "already at the initial configuration."
+            index, message = rewind(index, rate)
+        elif key == "f":
+            rate += 1
+            message = f"step rate: {_steps(rate)} at a time."
+        elif key == "s":
+            if rate == 1:
+                message = "step rate is already 1 step at a time."
             else:
-                index -= 1
+                rate -= 1
+                message = f"step rate: {_steps(rate)} at a time."
         else:
-            message = f"unknown key {key!r}; use n, p, or q."
+            message = f"unknown key {key!r}; use n, p, f, s, or q."
 
 
 # --- entry point -------------------------------------------------------------

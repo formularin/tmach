@@ -118,9 +118,19 @@ The simulator reads single keys:
 
 | Key | Action |
 | --- | --- |
-| `n` | advance to the next configuration |
-| `p` | return to the previous configuration |
+| `n` | play forward by the step rate |
+| `p` | rewind by the step rate |
+| `f` | faster — increase the step rate by one |
+| `s` | slower — decrease the step rate by one |
 | `q` | stop |
+
+The **step rate** is how many steps `n` and `p` cover at a time. It starts at 1,
+so both keys move one configuration until you press `f`. The current rate is
+shown on the prompt line:
+
+```
+[n]ext  [p]revious  [f]aster  [s]lower  [q]uit   (rate: 4 steps) >
+```
 
 Each configuration is shown with the current state, the transition that produced
 it, and one framed row per tape with a caret under the head:
@@ -191,11 +201,20 @@ and rejects any rule whose matched set is entirely covered by earlier rules. Tha
 is exponential in the number of tapes, so above 8 tapes the check is skipped with
 a warning on stderr rather than hanging.
 
-### Stepping backwards
+### Stepping backwards, and the step rate
 
 `p` walks a stored list of past configurations, so it returns the genuine
 previous configuration rather than trying to invert a transition. Stepping
 forward again from a rewound position reuses the stored configuration.
+
+Raising the step rate plays several steps per keystroke rather than skipping
+them: every intermediate configuration is still computed and kept in the history,
+so a fast `n` followed by a slow `p` walks back through everything that happened.
+
+Both keys stop at the ends rather than overshooting. `n` halts early if the
+machine reaches `acc` or `rej`, reporting how far it actually got
+(`played 3 steps, then the machine halted.`); `p` stops at the initial
+configuration. The rate itself has no upper bound but floors at 1.
 
 ### Terminal handling
 
