@@ -1,4 +1,4 @@
-# tm — a multi-tape Turing machine simulator
+# tmach — a multi-tape Turing machine simulator
 
 There are lots of Turing machine simulators, but this one is especially designed
 to be useful for a homework problem I have been assigned (and not yet completed).
@@ -12,12 +12,12 @@ learning curve.
 Most of the text in this repository (guess: including what you are currently
 reading?) was written by Claude Opus 5.
 
-`tm.py` reads a Turing machine written as a plain text file, runs it on an input
+`tmach.py` reads a Turing machine written as a plain text file, runs it on an input
 string, and lets you step forwards and backwards through its configurations via
 an interface within the terminal.
 
 ```
-python tm.py <spec> <input>
+python tmach.py <spec> <input>
 ```
 
 | Argument | Meaning |
@@ -100,7 +100,7 @@ only `(0, 0)`, `(1, 1)`, `(_, _)`, and `(start, start)`.
 
 ### Example
 
-`example.tm` accepts every input and populates the second tape with $2^k$ ones,
+`example.tmach` accepts every input and populates the second tape with $2^k$ ones,
 where $k$ is the length of the input:
 
 ```
@@ -142,7 +142,7 @@ and the screen is cleared on each redraw. When stdin is a pipe, input falls back
 to one line per key and the screen is not cleared, which makes runs scriptable:
 
 ```
-printf 'n\nn\nn\nq\n' | python tm.py example.tm 11
+printf 'n\nn\nn\nq\n' | python tmach.py example.tmach 11
 ```
 
 Ctrl-C and Ctrl-D exit the same way `q` does. The view auto-sizes to the terminal
