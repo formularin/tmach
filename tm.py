@@ -2,10 +2,9 @@
 """Multi-tape Turing machine simulator.
 
 Reads a machine description (see tm.md for the format), runs it on an input
-string, and lets you step forwards and backwards through the configurations
-while mirroring the current view to a text file.
+string, and lets you step forwards and backwards through the configurations.
 
-    python tm.py example.tm 1011 -o tm_output.txt
+    python tm.py example.tm 1011
 """
 
 from __future__ import annotations
@@ -417,14 +416,6 @@ def render(machine: Machine, config: Config, index: int, input_string: str, ncel
     return "\n".join(lines)
 
 
-def write_output(path: str, text: str) -> None:
-    try:
-        with open(path, "w", encoding="utf-8") as handle:
-            handle.write(text + "\n")
-    except OSError as exc:
-        raise TMError(f"cannot write output file {path!r}: {exc.strerror}") from None
-
-
 # --- interactive loop --------------------------------------------------------
 
 
@@ -457,7 +448,7 @@ def terminal_cells(label_w: int) -> int:
     return max(4, (columns - label_w - 12) // 4)
 
 
-def run(machine: Machine, input_string: str, output_path: str) -> None:
+def run(machine: Machine, input_string: str) -> None:
     history = [initial_config(machine, input_string)]
     index = 0
     message = ""
@@ -466,12 +457,9 @@ def run(machine: Machine, input_string: str, output_path: str) -> None:
 
     while True:
         config = history[index]
-        write_output(output_path, render(machine, config, index, input_string, 30))
-
         if interactive:
             sys.stdout.write("\033[2J\033[H")
         print(render(machine, config, index, input_string, terminal_cells(label_w)))
-        print(f"\noutput: {output_path}")
         if message:
             print(message)
         message = ""
@@ -515,12 +503,6 @@ def main(argv: Optional[list] = None) -> int:
     )
     parser.add_argument("spec", help="path to the machine specification")
     parser.add_argument("input", nargs="?", default="", help="input string over {0, 1} (default: empty)")
-    parser.add_argument(
-        "-o",
-        "--output",
-        default="tm_output.txt",
-        help="file continuously rewritten with the current configuration (default: tm_output.txt)",
-    )
     args = parser.parse_args(argv)
 
     try:
@@ -528,7 +510,7 @@ def main(argv: Optional[list] = None) -> int:
         if bad:
             raise TMError(f"input must be a string over {{0, 1}}; found {bad[0]!r}")
         machine = parse_spec(args.spec)
-        run(machine, args.input, args.output)
+        run(machine, args.input)
     except TMError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
