@@ -1,5 +1,3 @@
-2
-
 main:
   (start, start) -> (start, start, main,      S, R)
   (start, _) ->     (start, 1,     scan_left, R, S)

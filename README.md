@@ -21,7 +21,8 @@ blanks; every other tape is entirely blank.
 The input alphabet is always `{0, 1}` and the tape alphabet is always
 Γ = `{0, 1, _, start}`, where `_` is the blank. What a specification chooses is:
 
-- the number of tapes *k* ≥ 1,
+- the number of tapes *k* ≥ 1, which is not written down anywhere but follows
+  from the arity of the transitions,
 - the state set (which always contains the halting states `acc` and `rej`),
 - the transition function δ : Γᵏ × Q → Γᵏ × Q × {L, R, S}ᵏ, where `S` leaves a
   head in place,
@@ -32,9 +33,13 @@ see [Invalid actions](#invalid-actions).
 
 ## Specification format
 
-The first line is the number of tapes. Every subsequent non-empty line is either
-a state header or a transition. Whitespace is otherwise insignificant, but each
-state header and each transition must be on its own line.
+Every non-empty line is either a state header or a transition. Whitespace is
+otherwise insignificant, but each state header and each transition must be on its
+own line.
+
+The number of tapes is not declared. It is **inferred from the arity of the
+transition function**: the first transition in the file has *k* entries on its
+left-hand side, and every transition thereafter is checked against that *k*.
 
 ### States
 
@@ -80,8 +85,6 @@ specification is rejected rather than silently containing dead code.
 where *k* is the length of the input:
 
 ```
-2
-
 main:
   (start, start) -> (start, start, main,      S, R)
   (start, _) ->     (start, 1,     scan_left, R, S)
@@ -168,6 +171,17 @@ A name repeated within one pattern **unifies**: `(a, a)` matches only `(0, 0)`,
 if `a` could hold two different characters at once, writing `a` back would have
 no defined meaning.
 
+### Inferring the number of tapes
+
+The arity is taken from the *first* transition in the file: its left-hand side
+fixes *k*, and its right-hand side is required to have 2*k* + 1 entries. Every
+later transition is then measured against that *k*, and a mismatch names the line
+the count came from, so a typo in one rule is reported as a disagreement with a
+specific earlier rule rather than as a vague arity error.
+
+A specification with states but no transitions is rejected, since there is
+nothing to infer *k* from. Such a machine would reject every input anyway.
+
 ### Rule precedence and validation
 
 Matching is first-match-wins at run time, scanning a state's rules in file order.
@@ -200,8 +214,8 @@ labels the visible range.
 ### Errors
 
 Every failure exits with status 1 and a single `error:` line naming the file and
-line number where possible — bad tape count, wrong tuple arity, unknown target
+line number where possible — an unparseable line, wrong tuple arity, unknown target
 state, unbound right-hand-side variable, a variable colliding with a state name,
 a transition before any state header, duplicate or `acc`/`rej` state headers, an
-invalid move, an unparseable line, a missing or empty specification, and an
-input string outside `{0, 1}`.
+invalid move, a missing or empty specification, a specification with no
+transitions to infer an arity from, and an input string outside `{0, 1}`.

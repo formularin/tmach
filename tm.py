@@ -101,23 +101,11 @@ def parse_spec(path: str) -> Machine:
     if not lines:
         raise TMError(f"{path}: the specification is empty")
 
-    num_tapes = _parse_tape_count(path, *lines[0])
-    order, pending = _split_into_states(path, lines[1:])
-    states = _parse_rules(path, num_tapes, order, pending)
+    order, pending, first = _split_into_states(path, lines)
+    num_tapes, arity_line = _infer_num_tapes(path, first)
+    states = _parse_rules(path, num_tapes, arity_line, order, pending)
     _check_redundancy(path, num_tapes, states)
     return Machine(path=path, num_tapes=num_tapes, states=states, initial=order[0])
-
-
-def _parse_tape_count(path: str, line_no: int, text: str) -> int:
-    try:
-        num_tapes = int(text)
-    except ValueError:
-        raise TMError(
-            f"{path}:{line_no}: the first line must be the number of tapes, got {text!r}"
-        ) from None
-    if num_tapes < 1:
-        raise TMError(f"{path}:{line_no}: the number of tapes must be at least 1, got {num_tapes}")
-    return num_tapes
 
 
 def _split_into_states(path: str, lines: list) -> tuple:
@@ -125,6 +113,7 @@ def _split_into_states(path: str, lines: list) -> tuple:
     order: list = []
     pending: dict = {}
     current: Optional[str] = None
+    first: Optional[tuple] = None
 
     for line_no, text in lines:
         where = f"{path}:{line_no}"
@@ -145,6 +134,8 @@ def _split_into_states(path: str, lines: list) -> tuple:
             if current is None:
                 raise TMError(f"{where}: transition appears before any state is defined")
             pending[current].append((line_no, text))
+            if first is None:
+                first = (line_no, text)
         else:
             raise TMError(
                 f"{where}: cannot parse {text!r}; expected a state header such as 'main:' "
@@ -153,10 +144,34 @@ def _split_into_states(path: str, lines: list) -> tuple:
 
     if not order:
         raise TMError(f"{path}: no states are defined")
-    return order, pending
+    return order, pending, first
 
 
-def _parse_rules(path: str, num_tapes: int, order: list, pending: dict) -> dict:
+def _infer_num_tapes(path: str, first: Optional[tuple]) -> tuple:
+    """The number of tapes is the arity of the transition function.
+
+    It is read off the first transition in the file; every later transition is
+    then checked against it.
+    """
+    if first is None:
+        raise TMError(
+            f"{path}: cannot infer the number of tapes because the specification has no transitions"
+        )
+    line_no, text = first
+    where = f"{path}:{line_no}"
+    lhs_text, rhs_text = TRANSITION_RE.match(text).groups()
+    num_tapes = len(_split_fields(lhs_text, where, "left-hand side"))
+    rhs = _split_fields(rhs_text, where, "right-hand side")
+    if len(rhs) != 2 * num_tapes + 1:
+        raise TMError(
+            f"{where}: the number of tapes is inferred from this, the first transition, whose "
+            f"{num_tapes}-entry left-hand side calls for a right-hand side of {2 * num_tapes + 1} "
+            f"entries ({num_tapes} symbol(s), a state, {num_tapes} move(s)), not {len(rhs)}"
+        )
+    return num_tapes, line_no
+
+
+def _parse_rules(path: str, num_tapes: int, arity_line: int, order: list, pending: dict) -> dict:
     """Second pass: parse each transition now that every state name is known."""
     state_names = frozenset(order) | HALTING
     states = {name: [] for name in order}
@@ -168,15 +183,16 @@ def _parse_rules(path: str, num_tapes: int, order: list, pending: dict) -> dict:
             lhs = _split_fields(lhs_text, where, "left-hand side")
             rhs = _split_fields(rhs_text, where, "right-hand side")
 
+            source = f"{num_tapes} tape(s), inferred from the transition on line {arity_line}"
             if len(lhs) != num_tapes:
                 raise TMError(
-                    f"{where}: the left-hand side has {len(lhs)} entries but the machine has "
-                    f"{num_tapes} tape(s)"
+                    f"{where}: the left-hand side has {len(lhs)} entries but the machine has {source}"
                 )
             if len(rhs) != 2 * num_tapes + 1:
                 raise TMError(
                     f"{where}: the right-hand side has {len(rhs)} entries but should have "
-                    f"{2 * num_tapes + 1} ({num_tapes} symbol(s), a state, {num_tapes} move(s))"
+                    f"{2 * num_tapes + 1} ({num_tapes} symbol(s), a state, {num_tapes} move(s)) "
+                    f"for {source}"
                 )
 
             pattern = tuple(_parse_elem(tok, where, state_names) for tok in lhs)
