@@ -24,6 +24,33 @@ python tmach.py <spec> <input>
 
 ## The machine model
 
+To explore the reachable **configuration graph** in a browser, use the separate
+PyVis script (the terminal simulator does not need this dependency):
+
+```sh
+python -m pip install -r requirements-visualize.txt
+python visualize.py example.tmach 11 --open
+```
+
+This writes `configuration_graph.html`; you can also open that file manually.
+Each node is a distinct configuration labeled with a stable ID for that export
+(`C0`, `C1`, …) and its state. Click a node, or choose it from the dropdown, to see
+its tapes and head positions. Click an arrow to see the transition and any
+ignored-action notes. Green nodes accept, red nodes reject, and the initial node
+has a thick border. You can drag nodes, zoom, fit the graph, and freeze the layout.
+
+The script explores all branches using breadth-first search, merging repeated
+configurations and preserving cycles. It includes implicit rejections from missing
+rules. Exploration defaults to 500 nodes and depth 50 because reachable graphs
+can be infinite. Yellow nodes have omitted successors; the page reports whether
+the graph is complete. Increase the limits or choose an output path with:
+
+```sh
+python visualize.py example.tmach 11 --max-nodes 2000 --max-depth 200 -o example-graph.html
+```
+
+The HTML embeds the graph library so the visualization works offline.
+
 Tapes are infinite only to the right. Cell 0 of every tape holds the start
 symbol, and every head begins there. Tape 1 holds the input followed by
 blanks; every other tape is entirely blank.

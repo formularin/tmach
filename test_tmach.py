@@ -1,5 +1,6 @@
 import contextlib
 import io
+from itertools import combinations
 from pathlib import Path
 import tempfile
 import unittest
@@ -91,10 +92,35 @@ class MachineTests(unittest.TestCase):
     def test_symmetric_example(self):
         machine = tmach.parse_spec('symmetric.tmach')
         self.assertTrue(machine.nondeterministic)
-        self.assertEqual(len(machine.states['write']), 6)
-        path = tmach.accepting_path(machine, tmach.initial_config(machine, 'xzs'))
+        path = tmach.accepting_path(machine, tmach.initial_config(machine, '_wz_s'))
         self.assertIsNotNone(path)
         self.assertEqual(path[-1].state, tmach.ACCEPT)
+
+    def test_symmetric_all_undirected_graphs(self):
+        machine = tmach.parse_spec(str(Path(__file__).with_name('symmetric.tmach')))
+        possible_edges = list(combinations('wxyz', 2))
+        for mask in range(1 << len(possible_edges)):
+            edges = [edge for i, edge in enumerate(possible_edges) if mask & (1 << i)]
+            neighbors = {node: set() for node in 'wxyz'}
+            for first, second in edges:
+                neighbors[first].add(second)
+                neighbors[second].add(first)
+
+            reachable = {'w'}
+            pending = ['w']
+            while pending:
+                for neighbor in neighbors[pending.pop()] - reachable:
+                    reachable.add(neighbor)
+                    pending.append(neighbor)
+
+            # Blank cells separate edge pairs; s bounds the input, including
+            # the empty graph, so the machine's configuration graph is finite.
+            input_string = '_' + '_'.join(''.join(edge) for edge in edges) + '_s'
+            with self.subTest(edges=edges, input=input_string):
+                path = tmach.accepting_path(
+                    machine, tmach.initial_config(machine, input_string)
+                )
+                self.assertEqual(path is not None, 'z' in reachable)
 
     def test_comments(self):
         machine = self.parse(

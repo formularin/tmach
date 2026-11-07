@@ -1,0 +1,54 @@
+alphabet: w,x,y,z,s,_  # s indicates end of input (keeps number of configurations finite)
+
+main:
+  (start, start) -> (start, start, main, R, R)
+  (a, _) -> (a, w, scan_left, S, S)
+
+scan_left:  # scan mode and on the left side of the edge
+  (a, z) -> (a, z, acc, S, S)
+  (start, b) -> (start, b, scan_left, R, S)
+                (start, b, scan_right, R, S)
+  (s, b) -> (s, b, scan_right, L, S)
+            (s, b, scan_left, L, S)
+  (_, b) -> (_, b, scan_left, R, S)
+            (_, b, scan_right, L, S)
+  (a, a) -> (a, a, write_left, S, S)
+            (a, a, scan_right, R, S)
+            (a, a, scan_left, L, S)
+  (a, b) -> (a, b, scan_right, R, S)
+            (a, b, scan_left, L, S)
+            (a, b, scan_right, L, S)
+
+scan_right:  # scan mode and on the right side of the edge
+  (a, z) -> (a, z, acc, S, S)
+  (start, b) -> (start, b, scan_left, R, S)
+                (start, b, scan_right, R, S)
+  (s, b) -> (s, b, scan_right, L, S)
+            (s, b, scan_left, L, S)
+  (_, b) -> (_, b, scan_left, R, S)
+            (_, b, scan_right, L, S)
+  (a, a) -> (a, a, write_right, S, S)
+            (a, a, scan_right, R, S)
+            (a, a, scan_left, L, S)
+  (a, b) -> (a, b, scan_left, R, S)
+            (a, b, scan_right, R, S)
+            (a, b, scan_left, L, S)
+
+write_left:  # write mode and on the left side of the edge
+  (start, b) -> (start, b, write_left, R, S)
+  (_, b) -> (_, b, write_left, R, S)
+  (a, a) -> (a, a, write_right, R, S)
+            (a, a, write_left, L, S)
+            (a, a, scan_left, S, S)
+  (a, b) -> (a, a, write_left, S, S)
+            (a, b, write_right, R, S)
+
+write_right:  # write mode and on the right side of the edge
+  (s, b) -> (s, b, write_right, L, S)
+  (_, b) -> (_, b, write_right, L, S)
+  (a, a) -> (a, a, write_right, R, S)
+            (a, a, write_left, L, S)
+            (a, a, scan_right, S, S)
+  (a, b) -> (a, a, write_right, S, S)
+            (a, b, write_left, L, S)
+
