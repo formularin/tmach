@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Multi-tape Turing machine simulator.
 
-Reads a machine description (see tm.md for the format), runs it on an input
+Reads a machine description (see README.md for the format), runs it on an input
 string, and lets you step forwards and backwards through the configurations.
 
     python tmach.py example.tmach 1011
@@ -14,16 +14,16 @@ import keyword
 import re
 import shutil
 import sys
+import time
+from collections import deque
 from dataclasses import dataclass
 from itertools import product
-from typing import Optional
+from typing import Callable, Optional
 
 # --- tape alphabet -----------------------------------------------------------
 
 BLANK = "_"
 START = "start"
-GAMMA = ("0", "1", BLANK, START)
-LITERALS = frozenset(GAMMA)
 MOVES = ("L", "R", "S")
 ACCEPT, REJECT = "acc", "rej"
 HALTING = frozenset((ACCEPT, REJECT))
@@ -31,9 +31,10 @@ HALTING = frozenset((ACCEPT, REJECT))
 CELL = {"0": "0", "1": "1", BLANK: "_", START: ">"}
 
 HEADER_RE = re.compile(r"^([A-Za-z_]\w*)\s*:$")
-TRANSITION_RE = re.compile(r"^\(([^()]*)\)\s*->\s*\(([^()]*)\)$")
+TRANSITION_RE = re.compile(r"^\(([^()]*)\)\s*->\s*((?:\([^()]*\)\s*,?\s*)+)$")
+RHS_RE = re.compile(r"\(([^()]*)\)")
 
-# Redundancy checking enumerates |GAMMA|^k tuples; skip it for absurd tape counts.
+# Redundancy checking enumerates |Gamma|^k tuples; bound the work.
 MAX_COVERAGE_TUPLES = 1 << 16
 
 
@@ -79,6 +80,11 @@ class Machine:
     num_tapes: int
     states: dict  # state name -> list of Rules, in file order
     initial: str
+    alphabet: tuple = ("0", "1")
+
+    @property
+    def nondeterministic(self) -> bool:
+        return any(len({r.line_no for r in rules}) < len(rules) for rules in self.states.values())
 
 
 # --- specification parsing ---------------------------------------------------
@@ -101,11 +107,22 @@ def parse_spec(path: str) -> Machine:
     if not lines:
         raise TMError(f"{path}: the specification is empty")
 
+    alphabet = ("0", "1")
+    if lines and lines[0][1].startswith("alphabet:"):
+        line_no, declaration = lines.pop(0)
+        value = declaration.split(":", 1)[1].strip()
+        alphabet = tuple(_split_fields(value, f"{path}:{line_no}", "alphabet")) if value else ()
+        if len(set(alphabet)) != len(alphabet):
+            raise TMError(f"{path}:{line_no}: duplicate input alphabet symbol")
+        for symbol in alphabet:
+            if symbol in (BLANK, START) or len(symbol) != 1 or symbol.isspace() or symbol in "(),:>\\":
+                raise TMError(f"{path}:{line_no}: invalid input alphabet symbol {symbol!r}; use single characters other than blank and start")
+    literals = frozenset(alphabet) | {BLANK, START}
     order, pending, first = _split_into_states(path, lines)
     num_tapes, arity_line = _infer_num_tapes(path, first)
-    states = _parse_rules(path, num_tapes, arity_line, order, pending)
-    _check_redundancy(path, num_tapes, states)
-    return Machine(path=path, num_tapes=num_tapes, states=states, initial=order[0])
+    states = _parse_rules(path, num_tapes, arity_line, order, pending, literals)
+    _check_redundancy(path, num_tapes, states, tuple(alphabet) + (BLANK, START))
+    return Machine(path=path, num_tapes=num_tapes, states=states, initial=order[0], alphabet=alphabet)
 
 
 def _split_into_states(path: str, lines: list) -> tuple:
@@ -161,7 +178,7 @@ def _infer_num_tapes(path: str, first: Optional[tuple]) -> tuple:
     where = f"{path}:{line_no}"
     lhs_text, rhs_text = TRANSITION_RE.match(text).groups()
     num_tapes = len(_split_fields(lhs_text, where, "left-hand side"))
-    rhs = _split_fields(rhs_text, where, "right-hand side")
+    rhs = _split_fields(RHS_RE.findall(rhs_text)[0], where, "right-hand side")
     if len(rhs) != 2 * num_tapes + 1:
         raise TMError(
             f"{where}: the number of tapes is inferred from this, the first transition, whose "
@@ -171,7 +188,7 @@ def _infer_num_tapes(path: str, first: Optional[tuple]) -> tuple:
     return num_tapes, line_no
 
 
-def _parse_rules(path: str, num_tapes: int, arity_line: int, order: list, pending: dict) -> dict:
+def _parse_rules(path: str, num_tapes: int, arity_line: int, order: list, pending: dict, literals: frozenset) -> dict:
     """Second pass: parse each transition now that every state name is known."""
     state_names = frozenset(order) | HALTING
     states = {name: [] for name in order}
@@ -181,54 +198,55 @@ def _parse_rules(path: str, num_tapes: int, arity_line: int, order: list, pendin
             where = f"{path}:{line_no}"
             lhs_text, rhs_text = TRANSITION_RE.match(text).groups()
             lhs = _split_fields(lhs_text, where, "left-hand side")
-            rhs = _split_fields(rhs_text, where, "right-hand side")
+            for alternative in RHS_RE.findall(rhs_text):
+                rhs = _split_fields(alternative, where, "right-hand side")
 
-            source = f"{num_tapes} tape(s), inferred from the transition on line {arity_line}"
-            if len(lhs) != num_tapes:
-                raise TMError(
-                    f"{where}: the left-hand side has {len(lhs)} entries but the machine has {source}"
-                )
-            if len(rhs) != 2 * num_tapes + 1:
-                raise TMError(
-                    f"{where}: the right-hand side has {len(rhs)} entries but should have "
-                    f"{2 * num_tapes + 1} ({num_tapes} symbol(s), a state, {num_tapes} move(s)) "
-                    f"for {source}"
-                )
-
-            pattern = tuple(_parse_elem(tok, where, state_names) for tok in lhs)
-            bound = {e.value for e in pattern if e.is_var}
-
-            writes = tuple(_parse_elem(tok, where, state_names) for tok in rhs[:num_tapes])
-            for elem in writes:
-                if elem.is_var and elem.value not in bound:
+                source = f"{num_tapes} tape(s), inferred from the transition on line {arity_line}"
+                if len(lhs) != num_tapes:
                     raise TMError(
-                        f"{where}: {elem.value!r} is written but never matched on the left-hand side, "
-                        "so it has no value"
+                        f"{where}: the left-hand side has {len(lhs)} entries but the machine has {source}"
+                    )
+                if len(rhs) != 2 * num_tapes + 1:
+                    raise TMError(
+                        f"{where}: the right-hand side has {len(rhs)} entries but should have "
+                        f"{2 * num_tapes + 1} ({num_tapes} symbol(s), a state, {num_tapes} move(s)) "
+                        f"for {source}"
                     )
 
-            next_state = rhs[num_tapes]
-            if next_state not in state_names:
-                raise TMError(
-                    f"{where}: unknown target state {next_state!r} (defined states: "
-                    + ", ".join(sorted(state_names))
-                    + ")"
-                )
+                pattern = tuple(_parse_elem(tok, where, state_names, literals) for tok in lhs)
+                bound = {e.value for e in pattern if e.is_var}
 
-            moves = tuple(tok.upper() for tok in rhs[num_tapes + 1 :])
-            for move in moves:
-                if move not in MOVES:
-                    raise TMError(f"{where}: invalid head move {move!r}; expected one of L, R, S")
+                writes = tuple(_parse_elem(tok, where, state_names, literals) for tok in rhs[:num_tapes])
+                for elem in writes:
+                    if elem.is_var and elem.value not in bound:
+                        raise TMError(
+                            f"{where}: {elem.value!r} is written but never matched on the left-hand side, "
+                            "so it has no value"
+                        )
 
-            states[state].append(
-                Rule(
-                    line_no=line_no,
-                    state=state,
-                    pattern=pattern,
-                    writes=writes,
-                    next_state=next_state,
-                    moves=moves,
+                next_state = rhs[num_tapes]
+                if next_state not in state_names:
+                    raise TMError(
+                        f"{where}: unknown target state {next_state!r} (defined states: "
+                        + ", ".join(sorted(state_names))
+                        + ")"
+                    )
+
+                moves = tuple(tok.upper() for tok in rhs[num_tapes + 1 :])
+                for move in moves:
+                    if move not in MOVES:
+                        raise TMError(f"{where}: invalid head move {move!r}; expected one of L, R, S")
+
+                states[state].append(
+                    Rule(
+                        line_no=line_no,
+                        state=state,
+                        pattern=pattern,
+                        writes=writes,
+                        next_state=next_state,
+                        moves=moves,
+                    )
                 )
-            )
     return states
 
 
@@ -239,8 +257,8 @@ def _split_fields(text: str, where: str, side: str) -> list:
     return fields
 
 
-def _parse_elem(token: str, where: str, state_names: frozenset) -> Elem:
-    if token in LITERALS:
+def _parse_elem(token: str, where: str, state_names: frozenset, literals: frozenset) -> Elem:
+    if token in literals:
         return Elem(token, is_var=False)
     _check_identifier(token, "symbol or variable", where)
     if token in state_names:
@@ -265,19 +283,23 @@ def match(pattern: tuple, symbols: tuple) -> Optional[dict]:
     return binding
 
 
-def _check_redundancy(path: str, num_tapes: int, states: dict) -> None:
+def _check_redundancy(path: str, num_tapes: int, states: dict, gamma: tuple) -> None:
     """Reject rules that can never fire because earlier rules already cover them."""
-    if len(GAMMA) ** num_tapes > MAX_COVERAGE_TUPLES:
+    if len(gamma) ** num_tapes > MAX_COVERAGE_TUPLES:
         print(
             f"warning: {num_tapes} tapes is too many to check rule redundancy; skipping that check",
             file=sys.stderr,
         )
         return
 
-    all_tuples = list(product(GAMMA, repeat=num_tapes))
+    all_tuples = list(product(gamma, repeat=num_tapes))
     for state, rules in states.items():
         covered: set = set()
+        previous_line = None
         for rule in rules:
+            if rule.line_no == previous_line:
+                continue
+            previous_line = rule.line_no
             fresh = {t for t in all_tuples if t not in covered and match(rule.pattern, t) is not None}
             if not fresh:
                 raise TMError(
@@ -341,6 +363,10 @@ def step(machine: Machine, config: Config) -> Optional[Config]:
             notes=(),
         )
 
+    return _apply_rule(machine, config, rule, binding)
+
+
+def _apply_rule(machine: Machine, config: Config, rule: Rule, binding: dict) -> Config:
     tapes = [list(tape) for tape in config.tapes]
     heads = list(config.heads)
     notes: list = []
@@ -377,6 +403,62 @@ def step(machine: Machine, config: Config) -> Optional[Config]:
     )
 
 
+def successors(machine: Machine, config: Config):
+    """Yield all alternatives of the first matching transition line."""
+    if config.state in HALTING:
+        return
+    read = tuple(config.tapes[i][config.heads[i]] for i in range(machine.num_tapes))
+    chosen_line = None
+    for rule in machine.states[config.state]:
+        if chosen_line is not None and rule.line_no != chosen_line:
+            break
+        binding = match(rule.pattern, read)
+        if binding is not None:
+            chosen_line = rule.line_no
+            yield _apply_rule(machine, config, rule, binding)
+
+
+def _config_key(config: Config) -> tuple:
+    # Unvisited trailing blanks do not distinguish configurations.
+    tapes = []
+    for tape in config.tapes:
+        end = len(tape)
+        while end > 1 and tape[end - 1] == BLANK:
+            end -= 1
+        tapes.append(tape[:end])
+    return config.state, tuple(tapes), config.heads
+
+
+def accepting_path(
+    machine: Machine, initial: Config, on_progress: Optional[Callable[[int], None]] = None
+) -> Optional[list]:
+    """Search the reachable graph lazily, retaining parents for UI playback."""
+    initial_key = _config_key(initial)
+    parents = {initial_key: None}
+    configs = {initial_key: initial}
+    queue = deque([initial_key])
+    if on_progress is not None:
+        on_progress(1)
+    while queue:
+        key = queue.popleft()
+        config = configs[key]
+        if config.state == ACCEPT:
+            path = []
+            while key is not None:
+                path.append(configs[key])
+                key = parents[key]
+            return path[::-1]
+        for nxt in successors(machine, config):
+            nxt_key = _config_key(nxt)
+            if nxt_key not in parents:
+                parents[nxt_key] = key
+                configs[nxt_key] = nxt
+                queue.append(nxt_key)
+                if on_progress is not None:
+                    on_progress(len(parents))
+    return None
+
+
 # --- rendering ---------------------------------------------------------------
 
 
@@ -397,7 +479,7 @@ def _tape_block(index: int, tape: tuple, head: int, ncells: int, label_w: int) -
 
     return [
         pad + "┌" + "┬".join("───" for _ in cells) + "┐",
-        label + " │" + "│".join(f" {CELL[c]} " for c in cells) + "│",
+        label + " │" + "│".join(f" {CELL.get(c, c)} " for c in cells) + "│",
         pad + "└" + "┴".join("───" for _ in cells) + "┘" + window,
         pad + " " * (4 * (head - lo) + 2) + f"^ cell {head}",
     ]
@@ -499,6 +581,26 @@ def terminal_cells(label_w: int) -> int:
 
 def run(machine: Machine, input_string: str) -> None:
     history = [initial_config(machine, input_string)]
+    if machine.nondeterministic:
+        print("Searching for an accepting path...", flush=True)
+        seen = 0
+        last_update = None
+
+        def show_progress(count: int) -> None:
+            nonlocal seen, last_update
+            seen = count
+            now = time.monotonic()
+            if last_update is None or now - last_update >= 0.1:
+                print(f"\rConfigurations seen: {seen}", end="", flush=True)
+                last_update = now
+
+        try:
+            history = accepting_path(machine, history[0], on_progress=show_progress)
+        finally:
+            print(f"\rConfigurations seen: {seen}", flush=True)
+        if history is None:
+            print("No accepting path exists.")
+            return
     index = 0
     rate = 1  # how many steps "n" and "p" play at a time
     message = ""
@@ -554,14 +656,14 @@ def main(argv: Optional[list] = None) -> int:
         description="Step through a multi-tape Turing machine described by a spec file."
     )
     parser.add_argument("spec", help="path to the machine specification")
-    parser.add_argument("input", nargs="?", default="", help="input string over {0, 1} (default: empty)")
+    parser.add_argument("input", nargs="?", default="", help="input string over the declared alphabet (default: empty)")
     args = parser.parse_args(argv)
 
     try:
-        bad = [c for c in args.input if c not in ("0", "1")]
-        if bad:
-            raise TMError(f"input must be a string over {{0, 1}}; found {bad[0]!r}")
         machine = parse_spec(args.spec)
+        bad = [c for c in args.input if c not in machine.alphabet]
+        if bad:
+            raise TMError(f"input must use the input alphabet {machine.alphabet!r}; found {bad[0]!r}")
         run(machine, args.input)
     except TMError as exc:
         print(f"error: {exc}", file=sys.stderr)

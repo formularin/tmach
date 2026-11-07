@@ -23,7 +23,7 @@ python tmach.py <spec> <input>
 | Argument | Meaning |
 | --- | --- |
 | `spec` | path to the machine specification (required) |
-| `input` | the input string, over `{0, 1}` (optional, defaults to empty) |
+| `input` | the input string, over the declared input alphabet (optional, defaults to empty) |
 
 ## The machine model
 
@@ -31,9 +31,10 @@ Tapes are infinite only to the right. Cell 0 of every tape holds the start
 symbol, and every head begins there. Tape 1 holds the input followed by
 blanks; every other tape is entirely blank.
 
-The input alphabet is always `{0, 1}` and the tape alphabet is always
-$\Gamma$ = `{0, 1, _, start}`, where `_` is the blank. What a specification
-chooses is:
+The input alphabet defaults to `{0, 1}` and may be declared in the specification.
+The tape alphabet $\Gamma$ is exactly the input alphabet plus `_` (blank) and
+`start`; these two reserved symbols cannot be input symbols. A specification
+also chooses:
 
 - the number of tapes $k \geq 1$
 - the state set (which always contains the halting states `acc` and `rej`),
@@ -51,12 +52,28 @@ These consist of the following:
 
 ## Specification format
 
-Every non-empty line is either a state header or a transition. Whitespace is
+After an optional alphabet declaration, every non-empty line is either a state
+header or a transition. Whitespace is
 otherwise insignificant, but each state header and each transition must be on its
 own line.
 
 The number of tapes is not declared. It is inferred from the arity of the
 transition function.
+
+### Input alphabet
+
+To replace the default binary alphabet, put a comma-separated declaration before
+any states:
+
+```
+alphabet: a, b, c
+```
+
+Symbols are distinct single characters. Whitespace, tuple delimiters `(`, `)`,
+`,` and the syntax characters `:`, `>`, and `\` are not supported as input
+symbols. `_` and `start` are reserved. An empty `alphabet:` declares an empty
+input alphabet. Declared symbols are literals in transition patterns and writes;
+other identifiers are variables.
 
 ### States
 
@@ -80,7 +97,7 @@ go, and how to move each head:
 (read_1, ..., read_k) -> (write_1, ..., write_k, next_state, move_1, ..., move_k)
 ```
 
-Each read and write slot is either a literal — `0`, `1`, `_`, or `start` — or a
+Each read and write slot is either a literal from the tape alphabet or a
 variable. A variable matches any character in $\Gamma$, including `start`. Note
 that `_` is the blank symbol, not Python's throwaway name. Moves are `L`, `R`,
 or `S`.
@@ -89,7 +106,18 @@ A variable name may not be the name of any state in the file. A variable used on
 the right-hand side must have been bound on the left, so that it has a value to
 write.
 
-**Precedence.** Earlier rules win over later ones. A rule that matches no
+For a nondeterministic machine, list multiple result tuples after the arrow,
+separated by whitespace or commas:
+
+```
+main:
+  (start) -> (start, main, S), (start, acc, S)
+```
+
+Each tuple is a possible successor with the same pattern and variable bindings.
+
+**Precedence.** Earlier rules win over later ones. All alternatives on the first
+matching line are available; later lines do not add alternatives. A rule that matches no
 character tuple left unmatched by the rules above it causes a parsing error.
 
 **Gaps reject.** If no rule in the current state matches, the machine halts in
@@ -130,10 +158,27 @@ As an example of the precedence rule, note that `(a, b)` in the third rule of
 
 ### Rule redundancy check
 
-At load time, the program enumerates all $4^k$ character tuples per state
+At load time, the program enumerates all $|\Gamma|^k$ character tuples per state
 and rejects any rule whose matched set is entirely covered by earlier rules. That
-is exponential in the number of tapes, so above 8 tapes the check is skipped with
-a warning on stderr rather than hanging.
+is exponential in the number of tapes, so when there are more than 65,536 tuples the check is skipped with
+a warning on stderr.
+
+### Nondeterministic search
+
+When any transition has multiple alternatives, the program searches the
+configuration graph on the fly using breadth-first search. Repeated configurations
+are visited once, ignoring irrelevant trailing blank storage. An accepting path
+is therefore found even when another branch loops, and the UI lets you step
+forwards and backwards through a shortest accepting path.
+
+If the reachable graph is exhausted without acceptance, the program reports
+`No accepting path exists.` and exits without opening the UI. An infinite graph
+with no accepting path may be searched forever: no general algorithm can decide
+rejection for every such machine. Ctrl-C interrupts the search. Search stores
+visited configurations and can consume substantial memory on large graphs.
+During search, a live counter shows the number of distinct configurations seen,
+including the initial configuration; the final count is printed when search ends.
+Deterministic machines continue to run interactively as before.
 
 ### Terminal handling
 
