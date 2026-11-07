@@ -1,16 +1,13 @@
 # tmach — a multi-tape Turing machine simulator
 
-There are lots of Turing machine simulators, but this one is especially designed
-to be useful for a homework problem I have been assigned (and not yet completed).
-For example, the specific Turing machine variant is the one being used in class,
-and notation for specifying the machine is heavily based upon what I had
-scribbled in my notebook before realizing how helpful a simulator would be.
+There are lots of Turing machine simulators, but I decided to make one anyways because
+I thought it would be helpful for a specific homework problem I was assigned.
 However, this program may still be useful to you, especially if you want a
 lightweight thinking aid rather than a large piece of software with its own
 learning curve.
 
 Most of the text in this repository (guess: including what you are currently
-reading?) was written by Claude Opus 5.
+reading?) was written by AI.
 
 `tmach.py` reads a Turing machine written as a plain text file, runs it on an input
 string, and lets you step forwards and backwards through its configurations via
