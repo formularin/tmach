@@ -30,7 +30,7 @@ blanks; every other tape is entirely blank.
 
 The input alphabet defaults to `{0, 1}` and may be declared in the specification.
 The tape alphabet $\Gamma$ is exactly the input alphabet plus `_` (blank) and
-`start`; these two reserved symbols cannot be input symbols. A specification
+`start`. The blank `_` may also be declared as an input symbol; `start` cannot. A specification
 also chooses:
 
 - the number of tapes $k \geq 1$
@@ -51,8 +51,8 @@ These consist of the following:
 
 After an optional alphabet declaration, every non-empty line is either a state
 header or a transition. Whitespace is
-otherwise insignificant, but each state header and each transition must be on its
-own line.
+otherwise insignificant. Each state header and transition pattern must start on
+its own line; additional result tuples may continue on subsequent lines.
 
 Comments begin with `#` and continue to the end of the line. They can appear on
 their own or after a declaration, state header, or transition:
@@ -79,7 +79,8 @@ alphabet: a, b, c
 
 Symbols are distinct single characters. Whitespace, tuple delimiters `(`, `)`,
 `,` and the syntax characters `:`, `>`, and `\` are not supported as input
-symbols. `_` and `start` are reserved. An empty `alphabet:` declares an empty
+symbols. `start` is reserved. Declaring `_` allows blank cells in the input;
+these are the same blank symbol used elsewhere on the tape. An empty `alphabet:` declares an empty
 input alphabet. Declared symbols are literals in transition patterns and writes;
 other identifiers are variables.
 
@@ -122,10 +123,21 @@ main:
   (start) -> (start, main, S), (start, acc, S)
 ```
 
-Each tuple is a possible successor with the same pattern and variable bindings.
+Result tuples may also continue on subsequent lines, with optional commas:
 
-**Precedence.** Earlier rules win over later ones. All alternatives on the first
-matching line are available; later lines do not add alternatives. A rule that matches no
+```
+main:
+  (start) -> (start, main, S)
+             (start, acc, S)
+```
+
+Continuation tuples belong to the preceding transition in the same state.
+Blank lines and comments may separate alternatives. Each tuple is a possible
+successor with the same pattern and variable bindings.
+
+**Precedence.** Earlier rules win over later ones. All alternatives of the first
+matching pattern are available, including continuation tuples; later patterns
+do not add alternatives. A rule that matches no
 character tuple left unmatched by the rules above it causes a parsing error.
 
 **Gaps reject.** If no rule in the current state matches, the machine halts in

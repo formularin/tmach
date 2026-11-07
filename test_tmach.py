@@ -62,6 +62,40 @@ class MachineTests(unittest.TestCase):
         self.assertEqual(config.tapes[0][1], 'b')
         self.assertIn(' b ', tmach.render(machine, config, 2, 'a', 10))
 
+    def test_multiline_alternatives(self):
+        machine = self.parse(
+            'main:\n'
+            '  (start) -> (start, main, S)\n'
+            '  # comment between alternatives\n'
+            '            (start, rej, S), # trailing comment\n'
+            '\n'
+            '            (start, acc, S)\n'
+            '  (x) -> (x, rej, S)\n'
+        )
+        initial = tmach.initial_config(machine, '')
+        self.assertTrue(machine.nondeterministic)
+        self.assertEqual([c.state for c in tmach.successors(machine, initial)], ['main', 'rej', 'acc'])
+        self.assertEqual(len(tmach.accepting_path(machine, initial)), 2)
+        self.assertEqual([r.line_no for r in machine.states['main'][:3]], [2, 4, 6])
+
+    def test_multiline_errors(self):
+        with self.assertRaisesRegex(tmach.TMError, r':3: unknown target state'):
+            self.parse('main:\n(start) -> (start, acc, S)\n(start, missing, S)')
+        for text in ('(start, acc, S)', 'main:\n(start, acc, S)',
+                     'main:\n(start) -> (start, acc, S)\nother:\n(start, acc, S)'):
+            with self.subTest(text=text), self.assertRaisesRegex(tmach.TMError, 'alternative appears before'):
+                self.parse(text)
+        with self.assertRaisesRegex(tmach.TMError, 'can never fire'):
+            self.parse('main:\n(x) -> (x, acc, S)\n(x, rej, S)\n(start) -> (start, acc, S)')
+
+    def test_symmetric_example(self):
+        machine = tmach.parse_spec('symmetric.tmach')
+        self.assertTrue(machine.nondeterministic)
+        self.assertEqual(len(machine.states['write']), 6)
+        path = tmach.accepting_path(machine, tmach.initial_config(machine, 'xzs'))
+        self.assertIsNotNone(path)
+        self.assertEqual(path[-1].state, tmach.ACCEPT)
+
     def test_comments(self):
         machine = self.parse(
             '# machine description\n'
@@ -85,8 +119,24 @@ class MachineTests(unittest.TestCase):
         with self.assertRaisesRegex(tmach.TMError, 'specification is empty'):
             self.parse('# only comments\n  # another comment\n')
 
+    def test_underscore_input_alphabet(self):
+        machine = self.parse(
+            'alphabet: a, _\n'
+            'main:\n(start) -> (start, scan, R)\n'
+            'scan:\n(_) -> (_, scan, R)\n(a) -> (a, acc, S)'
+        )
+        self.assertEqual(machine.alphabet, ('a', '_'))
+        config = tmach.initial_config(machine, '__a')
+        for _ in range(4):
+            config = tmach.step(machine, config)
+        self.assertEqual(config.state, tmach.ACCEPT)
+        self.assertEqual(config.heads, (3,))
+        with patch('tmach.parse_spec', return_value=machine), patch('tmach.run') as run:
+            self.assertEqual(tmach.main(['unused', '__a']), 0)
+            run.assert_called_once_with(machine, '__a')
+
     def test_invalid_specs(self):
-        for text in ['alphabet: _', 'alphabet: start', 'alphabet: a, a']:
+        for text in ['alphabet: start', 'alphabet: a, a']:
             with self.subTest(text=text), self.assertRaises(tmach.TMError):
                 self.parse(text + '\nmain:\n(start) -> (start, acc, S)')
         with self.assertRaises(tmach.TMError):

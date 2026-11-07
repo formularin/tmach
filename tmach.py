@@ -32,6 +32,7 @@ CELL = {"0": "0", "1": "1", BLANK: "_", START: ">"}
 
 HEADER_RE = re.compile(r"^([A-Za-z_]\w*)\s*:$")
 TRANSITION_RE = re.compile(r"^\(([^()]*)\)\s*->\s*((?:\([^()]*\)\s*,?\s*)+)$")
+CONTINUATION_RE = re.compile(r"^(?:\([^()]*\)\s*,?\s*)+$")
 RHS_RE = re.compile(r"\(([^()]*)\)")
 
 # Redundancy checking enumerates |Gamma|^k tuples; bound the work.
@@ -60,6 +61,7 @@ class Elem:
 class Rule:
     line_no: int
     state: str
+    group_line: int  # first line of this transition, including its alternatives
     pattern: tuple  # k Elems matched against the symbols under the heads
     writes: tuple  # k Elems written back
     next_state: str
@@ -84,7 +86,7 @@ class Machine:
 
     @property
     def nondeterministic(self) -> bool:
-        return any(len({r.line_no for r in rules}) < len(rules) for rules in self.states.values())
+        return any(len({r.group_line for r in rules}) < len(rules) for rules in self.states.values())
 
 
 # --- specification parsing ---------------------------------------------------
@@ -115,13 +117,13 @@ def parse_spec(path: str) -> Machine:
         if len(set(alphabet)) != len(alphabet):
             raise TMError(f"{path}:{line_no}: duplicate input alphabet symbol")
         for symbol in alphabet:
-            if symbol in (BLANK, START) or len(symbol) != 1 or symbol.isspace() or symbol in "(),:>\\":
-                raise TMError(f"{path}:{line_no}: invalid input alphabet symbol {symbol!r}; use single characters other than blank and start")
+            if symbol == START or len(symbol) != 1 or symbol.isspace() or symbol in "(),:>\\":
+                raise TMError(f"{path}:{line_no}: invalid input alphabet symbol {symbol!r}; use single characters other than start")
     literals = frozenset(alphabet) | {BLANK, START}
     order, pending, first = _split_into_states(path, lines)
     num_tapes, arity_line = _infer_num_tapes(path, first)
     states = _parse_rules(path, num_tapes, arity_line, order, pending, literals)
-    _check_redundancy(path, num_tapes, states, tuple(alphabet) + (BLANK, START))
+    _check_redundancy(path, num_tapes, states, tuple(dict.fromkeys(alphabet + (BLANK, START))))
     return Machine(path=path, num_tapes=num_tapes, states=states, initial=order[0], alphabet=alphabet)
 
 
@@ -150,9 +152,15 @@ def _split_into_states(path: str, lines: list) -> tuple:
         elif TRANSITION_RE.match(text):
             if current is None:
                 raise TMError(f"{where}: transition appears before any state is defined")
-            pending[current].append((line_no, text))
+            pending[current].append((line_no, text, line_no))
             if first is None:
                 first = (line_no, text)
+        elif CONTINUATION_RE.fullmatch(text):
+            if current is None or not pending[current]:
+                raise TMError(f"{where}: alternative appears before a transition in this state")
+            _, previous_text, group_line = pending[current][-1]
+            lhs_text = TRANSITION_RE.match(previous_text).group(1)
+            pending[current].append((line_no, f"({lhs_text}) -> {text}", group_line))
         else:
             raise TMError(
                 f"{where}: cannot parse {text!r}; expected a state header such as 'main:' "
@@ -194,7 +202,7 @@ def _parse_rules(path: str, num_tapes: int, arity_line: int, order: list, pendin
     states = {name: [] for name in order}
 
     for state in order:
-        for line_no, text in pending[state]:
+        for line_no, text, group_line in pending[state]:
             where = f"{path}:{line_no}"
             lhs_text, rhs_text = TRANSITION_RE.match(text).groups()
             lhs = _split_fields(lhs_text, where, "left-hand side")
@@ -241,6 +249,7 @@ def _parse_rules(path: str, num_tapes: int, arity_line: int, order: list, pendin
                     Rule(
                         line_no=line_no,
                         state=state,
+                        group_line=group_line,
                         pattern=pattern,
                         writes=writes,
                         next_state=next_state,
@@ -297,9 +306,9 @@ def _check_redundancy(path: str, num_tapes: int, states: dict, gamma: tuple) -> 
         covered: set = set()
         previous_line = None
         for rule in rules:
-            if rule.line_no == previous_line:
+            if rule.group_line == previous_line:
                 continue
-            previous_line = rule.line_no
+            previous_line = rule.group_line
             fresh = {t for t in all_tuples if t not in covered and match(rule.pattern, t) is not None}
             if not fresh:
                 raise TMError(
@@ -410,11 +419,11 @@ def successors(machine: Machine, config: Config):
     read = tuple(config.tapes[i][config.heads[i]] for i in range(machine.num_tapes))
     chosen_line = None
     for rule in machine.states[config.state]:
-        if chosen_line is not None and rule.line_no != chosen_line:
+        if chosen_line is not None and rule.group_line != chosen_line:
             break
         binding = match(rule.pattern, read)
         if binding is not None:
-            chosen_line = rule.line_no
+            chosen_line = rule.group_line
             yield _apply_rule(machine, config, rule, binding)
 
 
