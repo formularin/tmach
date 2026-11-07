@@ -62,6 +62,29 @@ class MachineTests(unittest.TestCase):
         self.assertEqual(config.tapes[0][1], 'b')
         self.assertIn(' b ', tmach.render(machine, config, 2, 'a', 10))
 
+    def test_comments(self):
+        machine = self.parse(
+            '# machine description\n'
+            '  # indented comment\n'
+            'alphabet: a, b # input symbols\n'
+            'main: # initial state\n'
+            '  (start) -> (start, scan, R) # move onto input\n'
+            '# comment between states\n'
+            'scan:\n'
+            '  (a) -> (b, rej, S), (a, acc, S)# alternatives\n'
+            '# trailing comment\n'
+        )
+        path = tmach.accepting_path(machine, tmach.initial_config(machine, 'a'))
+        self.assertEqual([config.state for config in path], ['main', 'scan', 'acc'])
+        self.assertEqual(machine.states['main'][0].line_no, 5)
+        self.assertEqual(machine.states['scan'][0].line_no, 8)
+
+    def test_comments_preserve_error_line_numbers(self):
+        with self.assertRaisesRegex(tmach.TMError, r':4: unknown target state'):
+            self.parse('# comment\nmain: # state\n# another comment\n(start) -> (start, missing, S) # bad target')
+        with self.assertRaisesRegex(tmach.TMError, 'specification is empty'):
+            self.parse('# only comments\n  # another comment\n')
+
     def test_invalid_specs(self):
         for text in ['alphabet: _', 'alphabet: start', 'alphabet: a, a']:
             with self.subTest(text=text), self.assertRaises(tmach.TMError):

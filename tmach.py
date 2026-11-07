@@ -102,7 +102,7 @@ def parse_spec(path: str) -> Machine:
     except OSError as exc:
         raise TMError(f"cannot read spec file {path!r}: {exc.strerror}") from None
 
-    lines = [(n, line.strip()) for n, line in enumerate(raw_lines, 1)]
+    lines = [(n, line.split("#", 1)[0].strip()) for n, line in enumerate(raw_lines, 1)]
     lines = [(n, line) for n, line in lines if line]
     if not lines:
         raise TMError(f"{path}: the specification is empty")

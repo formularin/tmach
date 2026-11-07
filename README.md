@@ -57,6 +57,17 @@ header or a transition. Whitespace is
 otherwise insignificant, but each state header and each transition must be on its
 own line.
 
+Comments begin with `#` and continue to the end of the line. They can appear on
+their own or after a declaration, state header, or transition:
+
+```
+# Accept immediately
+main: # initial state
+  (start) -> (start, acc, S) # accept
+```
+
+`#` is reserved for comments and cannot be used as an input symbol.
+
 The number of tapes is not declared. It is inferred from the arity of the
 transition function.
 
