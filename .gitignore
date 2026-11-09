@@ -2,3 +2,5 @@
 .venv/
 TODO.txt
 __pycache__/
+configuration_graph.html
+tmp/

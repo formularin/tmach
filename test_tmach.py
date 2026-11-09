@@ -1,5 +1,6 @@
 import contextlib
 import io
+from collections import deque
 from itertools import combinations
 from pathlib import Path
 import tempfile
@@ -23,6 +24,53 @@ class MachineTests(unittest.TestCase):
         self.assertEqual([c.state for c in path], ['main', 'acc'])
         self.assertEqual(tmach.advance(machine, path, 0, 10)[0], 1)
         self.assertEqual(tmach.rewind(1, 1)[0], 0)
+
+    def test_nth_path_includes_cycles(self):
+        machine = self.parse('main:\n(start) -> (start, main, S), (start, acc, S)')
+        initial = tmach.initial_config(machine, '')
+        for nth in range(1, 5):
+            path = tmach.accepting_path(machine, initial, nth=nth)
+            self.assertEqual([c.state for c in path], ['main'] * nth + ['acc'])
+
+    def test_path_order_and_convergence(self):
+        # Reverse file order: textual ordering puts a before z. Both merge
+        # before acceptance, and the longer direct branch must come last.
+        machine = self.parse(
+            'main:\n(start) -> (start, z, S), (start, long, S), (start, a, S)\n'
+            'z:\n(x) -> (x, merge, S)\n'
+            'a:\n(x) -> (x, merge, S)\n'
+            'merge:\n(x) -> (x, acc, S)\n'
+            'long:\n(x) -> (x, a, S)'
+        )
+        initial = tmach.initial_config(machine, '')
+        for nth, branch in enumerate(('a', 'z', 'long'), 1):
+            path = tmach.accepting_path(machine, initial, nth=nth)
+            self.assertEqual(path[1].state, branch)
+        self.assertIsNone(tmach.accepting_path(machine, initial, nth=4))
+
+    def test_duplicate_alternatives_count(self):
+        machine = self.parse('main:\n(start) -> (start, acc, S), (start, acc, S)')
+        initial = tmach.initial_config(machine, '')
+        self.assertIsNotNone(tmach.accepting_path(machine, initial, nth=2))
+        self.assertIsNone(tmach.accepting_path(machine, initial, nth=3))
+
+    def test_nth_rejection_cycle_terminates(self):
+        machine = self.parse('main:\n(start) -> (start, main, S), (start, rej, S)')
+        self.assertIsNone(tmach.accepting_path(machine, tmach.initial_config(machine, ''), nth=3))
+
+    def test_nth_cli_and_validation(self):
+        machine = self.parse('main:\n(start) -> (start, acc, S)')
+        with patch('tmach.parse_spec', return_value=machine), patch('tmach.run') as run:
+            self.assertEqual(tmach.main(['unused', '--accepting-path', '3']), 0)
+            run.assert_called_once_with(machine, '', nth=3)
+        for value in ('0', '-1', 'abc'):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                tmach.main(['unused', '--accepting-path', value])
+        with self.assertRaises(tmach.TMError):
+            tmach.accepting_path(machine, tmach.initial_config(machine, ''), nth=0)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            tmach.run(machine, '', nth=2)
+        self.assertIn('Fewer than 2 accepting paths exist.', output.getvalue())
 
     def test_finite_rejecting_graph(self):
         machine = self.parse('main:\n(start) -> (start, main, S) (start, rej, S)')
@@ -121,6 +169,53 @@ class MachineTests(unittest.TestCase):
                     machine, tmach.initial_config(machine, input_string)
                 )
                 self.assertEqual(path is not None, 'z' in reachable)
+
+                self.assert_symmetric_graph(machine, input_string, 'z' in reachable)
+                reversed_input = '_' + '_'.join(
+                    ''.join(reversed(edge)) for edge in reversed(edges)
+                ) + '_s'
+                self.assert_symmetric_graph(machine, reversed_input, 'z' in reachable)
+
+    def assert_symmetric_graph(self, machine, input_string, accepts):
+        initial = tmach.initial_config(machine, input_string)
+        pending = deque([initial])
+        seen = {tmach._config_key(initial)}
+        edges = set()
+        accepted = False
+        while pending:
+            config = pending.popleft()
+            source = tmach._config_key(config)
+            accepted |= config.state == tmach.ACCEPT
+            self.assertNotEqual(config.state, tmach.REJECT)
+            self.assertEqual(config.tapes[0], initial.tapes[0])
+            self.assertLessEqual(config.heads[0], len(input_string))
+            self.assertLessEqual(config.heads[1], 1)
+            self.assertFalse(config.notes)
+            if config.state in tmach.HALTING:
+                continue
+            successors = list(tmach.successors(machine, config))
+            self.assertTrue(successors, 'Missing rules would implicitly reject')
+            for nxt in successors:
+                target = tmach._config_key(nxt)
+                if nxt.state not in tmach.HALTING:
+                    edges.add((source, target))
+                if target not in seen:
+                    seen.add(target)
+                    self.assertLess(len(seen), 10000, 'Expected a finite graph')
+                    pending.append(nxt)
+        self.assertEqual(accepted, accepts)
+        self.assertEqual(edges, {(target, source) for source, target in edges})
+
+    def test_symmetric_loops_duplicates_and_disconnected_endpoints(self):
+        machine = tmach.parse_spec(str(Path(__file__).with_name('symmetric.tmach')))
+        for input_string, accepts in [
+            ('_ww_xx_yy_zz_s', False),
+            ('_wx_yz_wx_zy_s', False),
+            ('_xx_yw_zx_xy_xy_ww_s', True),
+            ('_zw_zw_zz_s', True),
+        ]:
+            with self.subTest(input=input_string):
+                self.assert_symmetric_graph(machine, input_string, accepts)
 
     def test_comments(self):
         machine = self.parse(

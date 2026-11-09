@@ -1,4 +1,4 @@
-# tmach — a multi-tape Turing machine simulator
+# tmach: a multi-tape Turing machine simulator
 
 There are lots of Turing machine simulators, but I decided to make one anyways because
 I thought it would be helpful for a specific homework problem I was assigned.
@@ -21,6 +21,7 @@ python tmach.py <spec> <input>
 | --- | --- |
 | `spec` | path to the machine specification (required) |
 | `input` | the input string, over the declared input alphabet (optional, defaults to empty) |
+| `--accepting-path N` | show the Nth accepting path (positive integer, defaults to 1) |
 
 ## The machine model
 
@@ -212,20 +213,28 @@ a warning on stderr.
 
 ### Nondeterministic search
 
-When any transition has multiple alternatives, the program searches the
-configuration graph on the fly using breadth-first search. Repeated configurations
-are visited once, ignoring irrelevant trailing blank storage. An accepting path
-is therefore found even when another branch loops, and the UI lets you step
-forwards and backwards through a shortest accepting path.
+When any transition has multiple alternatives, the program searches for an
+accepting path and lets you step forwards and backwards through it. Paths are
+ordered with shorter paths first and a deterministic secondary criterion, which
+is convenient for exploring the space of accepting paths. To select the third
+accepting path, for example:
 
-If the reachable graph is exhausted without acceptance, the program reports
-`No accepting path exists.` and exits without opening the UI. An infinite graph
-with no accepting path may be searched forever: no general algorithm can decide
-rejection for every such machine. Ctrl-C interrupts the search. Search stores
-visited configurations and can consume substantial memory on large graphs.
-During search, a live counter shows the number of distinct configurations seen,
-including the initial configuration; the final count is printed when search ends.
-Deterministic machines continue to run interactively as before.
+```sh
+python tmach.py machine.tmach 11 --accepting-path 3
+```
+
+Paths that converge on the same configuration or traverse cycles are included;
+duplicate alternatives count separately. If a finite reachable graph has fewer
+than N accepting paths, the program reports this and exits without opening the
+UI. For the default N=1, it reports `No accepting path exists.` if none exist.
+
+An infinite graph with too few accepting paths may be searched forever: no
+general algorithm can decide rejection for every such machine. Ctrl-C interrupts
+the search. Retaining paths can consume substantial memory, particularly for
+large N. During search, a live counter shows the number of distinct configurations
+seen, including the initial configuration, ignoring irrelevant trailing blanks;
+the final count is printed when search ends. Deterministic machines continue to
+run interactively as before unless a later accepting path is requested.
 
 ### Terminal handling
 

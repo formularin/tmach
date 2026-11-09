@@ -439,32 +439,53 @@ def _config_key(config: Config) -> tuple:
 
 
 def accepting_path(
-    machine: Machine, initial: Config, on_progress: Optional[Callable[[int], None]] = None
+    machine: Machine, initial: Config, on_progress: Optional[Callable[[int], None]] = None,
+    *, nth: int = 1,
 ) -> Optional[list]:
-    """Search the reachable graph lazily, retaining parents for UI playback."""
-    initial_key = _config_key(initial)
-    parents = {initial_key: None}
-    configs = {initial_key: initial}
-    queue = deque([initial_key])
+    """Return the nth accepting transition path (one-based), or None.
+
+    Paths are ordered by transition count, then lexicographically by their
+    sequence of Config.prev strings (source state, normalized rule, bindings).
+    Identical transition strings retain alternative order from the spec, and
+    duplicate alternatives count separately. Cycles and converging paths count.
+
+    Sorted successors and FIFO traversal implement this shortlex order. Only
+    the first nth arrivals at each canonical configuration need expansion:
+    any later prefix has nth earlier prefixes with the same possible suffixes,
+    so cannot contribute one of the first nth accepting paths. This also makes
+    unsuccessful searches terminate on finite configuration graphs.
+    """
+    if nth < 1:
+        raise TMError("accepting path number must be a positive integer")
+    # Nodes have separate parents even when their configurations coincide.
+    nodes = [(initial, None)]
+    queue = deque([0])
+    arrivals = {_config_key(initial): 1}
+    found = 0
     if on_progress is not None:
         on_progress(1)
     while queue:
-        key = queue.popleft()
-        config = configs[key]
+        node = queue.popleft()
+        config, _ = nodes[node]
         if config.state == ACCEPT:
-            path = []
-            while key is not None:
-                path.append(configs[key])
-                key = parents[key]
-            return path[::-1]
-        for nxt in successors(machine, config):
-            nxt_key = _config_key(nxt)
-            if nxt_key not in parents:
-                parents[nxt_key] = key
-                configs[nxt_key] = nxt
-                queue.append(nxt_key)
-                if on_progress is not None:
-                    on_progress(len(parents))
+            found += 1
+            if found == nth:
+                path = []
+                while node is not None:
+                    config, node = nodes[node]
+                    path.append(config)
+                return path[::-1]
+            continue
+        for nxt in sorted(successors(machine, config), key=lambda c: c.prev):
+            key = _config_key(nxt)
+            count = arrivals.get(key, 0)
+            if count >= nth:
+                continue
+            arrivals[key] = count + 1
+            nodes.append((nxt, node))
+            queue.append(len(nodes) - 1)
+            if count == 0 and on_progress is not None:
+                on_progress(len(arrivals))
     return None
 
 
@@ -588,9 +609,11 @@ def terminal_cells(label_w: int) -> int:
     return max(4, (columns - label_w - 12) // 4)
 
 
-def run(machine: Machine, input_string: str) -> None:
+def run(machine: Machine, input_string: str, nth: int = 1) -> None:
+    if nth < 1:
+        raise TMError("accepting path number must be a positive integer")
     history = [initial_config(machine, input_string)]
-    if machine.nondeterministic:
+    if machine.nondeterministic or nth != 1:
         print("Searching for an accepting path...", flush=True)
         seen = 0
         last_update = None
@@ -604,11 +627,12 @@ def run(machine: Machine, input_string: str) -> None:
                 last_update = now
 
         try:
-            history = accepting_path(machine, history[0], on_progress=show_progress)
+            history = accepting_path(machine, history[0], on_progress=show_progress, nth=nth)
         finally:
             print(f"\rConfigurations seen: {seen}", flush=True)
         if history is None:
-            print("No accepting path exists.")
+            print("No accepting path exists." if nth == 1 else
+                  f"Fewer than {nth} accepting paths exist.")
             return
     index = 0
     rate = 1  # how many steps "n" and "p" play at a time
@@ -666,14 +690,21 @@ def main(argv: Optional[list] = None) -> int:
     )
     parser.add_argument("spec", help="path to the machine specification")
     parser.add_argument("input", nargs="?", default="", help="input string over the declared alphabet (default: empty)")
+    parser.add_argument("--accepting-path", type=int, default=1, metavar="N",
+                        help="show the Nth accepting path, shortest first (default: 1)")
     args = parser.parse_args(argv)
+    if args.accepting_path < 1:
+        parser.error("--accepting-path must be a positive integer")
 
     try:
         machine = parse_spec(args.spec)
         bad = [c for c in args.input if c not in machine.alphabet]
         if bad:
             raise TMError(f"input must use the input alphabet {machine.alphabet!r}; found {bad[0]!r}")
-        run(machine, args.input)
+        if args.accepting_path == 1:
+            run(machine, args.input)
+        else:
+            run(machine, args.input, nth=args.accepting_path)
     except TMError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

@@ -1,54 +1,203 @@
-alphabet: w,x,y,z,s,_  # s indicates end of input (keeps number of configurations finite)
+# Undirected st-connectivity on the fixed vertex set {w,x,y,z}, from w to z.
+# Tape 1: an undirected edge list, e.g. _wx_xy_yz_s. Each two-letter
+# pair is one edge; either orientation is allowed. Separate pairs with _ and
+# end with _s; __s encodes no edges. Loops and repeated edges are harmless.
+# Tape 2: one current-vertex symbol. Neither input nor endpoints are marked.
+#
+# Every edge in the configuration graph has its reverse, except
+# edges incident to acc/rej (the simulator's terminal states). In particular,
+# initialization is reversible too. Every nonhalting state has a rule for
+# every symbol pair, including configurations unreachable on valid inputs.
+#
+# scan walks the bounded input without changing the current vertex. To cross
+# an edge u--v, the machine follows this reversible chain (head positions i):
+#   scan(i,u) <-> left_u(i,u) <-> cross_u(i+1,u)
+#             <-> end_u(i+1,v) <-> scan(i+1,v).
+# The two scan attachments require input[i]=u and input[i+1]=v respectively.
+# Thus a completed chain changes the current vertex only across adjacent
+# vertex symbols, which are exactly an encoded edge's endpoints. Entering
+# from end_u guesses the old vertex u; a wrong guess cannot exit at left_u.
+# The state remembers u while overwriting tape 2, making that write reversible.
+#
+# Conversely either direction of any encoded edge can be traversed. Hence acc
+# is reachable exactly when z is connected to w. All heads stay within the
+# input through s and the first work cell, so exhaustive search also decides
+# negative instances (individual nondeterministic branches may loop).
+# To use another fixed vertex set, add one left/cross/end triple per vertex
+# and the corresponding scan alternatives and endpoint rules.
+alphabet: w,x,y,z,s,_
 
 main:
-  (start, start) -> (start, start, main, R, R)
-  (a, _) -> (a, w, scan_left, S, S)
+  (a, b) -> (a, b, initialize, S, R)
 
-scan_left:  # scan mode and on the left side of the edge
-  (a, z) -> (a, z, acc, S, S)
-  (start, b) -> (start, b, scan_left, R, S)
-                (start, b, scan_right, R, S)
-  (s, b) -> (s, b, scan_right, L, S)
-            (s, b, scan_left, L, S)
-  (_, b) -> (_, b, scan_left, R, S)
-            (_, b, scan_right, L, S)
-  (a, a) -> (a, a, write_left, S, S)
-            (a, a, scan_right, R, S)
-            (a, a, scan_left, L, S)
-  (a, b) -> (a, b, scan_right, R, S)
-            (a, b, scan_left, L, S)
-            (a, b, scan_right, L, S)
+initialize:
+  (start, _) -> (start, _, main, S, L)
+                (start, w, scan, S, S)
+  (a, start) -> (a, start, initialize, S, S)
+  (a, b) -> (a, b, main, S, L)
 
-scan_right:  # scan mode and on the right side of the edge
-  (a, z) -> (a, z, acc, S, S)
-  (start, b) -> (start, b, scan_left, R, S)
-                (start, b, scan_right, R, S)
-  (s, b) -> (s, b, scan_right, L, S)
-            (s, b, scan_left, L, S)
-  (_, b) -> (_, b, scan_left, R, S)
-            (_, b, scan_right, L, S)
-  (a, a) -> (a, a, write_right, S, S)
-            (a, a, scan_right, R, S)
-            (a, a, scan_left, L, S)
-  (a, b) -> (a, b, scan_left, R, S)
-            (a, b, scan_right, R, S)
-            (a, b, scan_left, L, S)
+scan:
+  (start, w) -> (start, w, scan_forward, S, S)
+                (start, _, initialize, S, S)
+  (start, b) -> (start, b, scan_forward, S, S)
+  (s, b) -> (s, b, scan_backward, S, S)
+  (w, w) -> (w, w, scan_forward, S, S)
+            (w, w, scan_backward, S, S)
+            (w, w, left_w, S, S)
+            (w, w, end_w, S, S)
+            (w, w, end_x, S, S)
+            (w, w, end_y, S, S)
+            (w, w, end_z, S, S)
+  (x, x) -> (x, x, scan_forward, S, S)
+            (x, x, scan_backward, S, S)
+            (x, x, left_x, S, S)
+            (x, x, end_w, S, S)
+            (x, x, end_x, S, S)
+            (x, x, end_y, S, S)
+            (x, x, end_z, S, S)
+  (y, y) -> (y, y, scan_forward, S, S)
+            (y, y, scan_backward, S, S)
+            (y, y, left_y, S, S)
+            (y, y, end_w, S, S)
+            (y, y, end_x, S, S)
+            (y, y, end_y, S, S)
+            (y, y, end_z, S, S)
+  (z, z) -> (z, z, scan_forward, S, S)
+            (z, z, scan_backward, S, S)
+            (z, z, left_z, S, S)
+            (z, z, end_w, S, S)
+            (z, z, end_x, S, S)
+            (z, z, end_y, S, S)
+            (z, z, end_z, S, S)
+            (z, z, acc, S, S)
+  (a, b) -> (a, b, scan_forward, S, S)
+            (a, b, scan_backward, S, S)
 
-write_left:  # write mode and on the left side of the edge
-  (start, b) -> (start, b, write_left, R, S)
-  (_, b) -> (_, b, write_left, R, S)
-  (a, a) -> (a, a, write_right, R, S)
-            (a, a, write_left, L, S)
-            (a, a, scan_left, S, S)
-  (a, b) -> (a, a, write_left, S, S)
-            (a, b, write_right, R, S)
+# Separate stationary guards from movement: the unconditional R/L pair is
+# reversible regardless of the symbols on neighboring cells. The guards keep
+# reachable scans between start and s, without breaking symmetry elsewhere.
+scan_forward:
+  (s, b) -> (s, b, scan_backward, R, S)
+  (a, b) -> (a, b, scan, S, S)
+            (a, b, scan_backward, R, S)
 
-write_right:  # write mode and on the right side of the edge
-  (s, b) -> (s, b, write_right, L, S)
-  (_, b) -> (_, b, write_right, L, S)
-  (a, a) -> (a, a, write_right, R, S)
-            (a, a, write_left, L, S)
-            (a, a, scan_right, S, S)
-  (a, b) -> (a, a, write_right, S, S)
-            (a, b, write_left, L, S)
+scan_backward:
+  (start, b) -> (start, b, scan_backward, S, S)
+  (a, b) -> (a, b, scan, S, S)
+            (a, b, scan_forward, L, S)
 
+# Remember the old vertex w; only the matching endpoint attaches to scan.
+left_w:
+  (w, w) -> (w, w, scan, S, S)
+            (w, w, cross_w, R, S)
+  (a, b) -> (a, b, cross_w, R, S)
+
+cross_w:
+  (start, b) -> (start, b, cross_w, S, S)
+  (w, w) -> (w, w, left_w, L, S)
+            (w, w, end_w, S, S)
+  (x, w) -> (x, w, left_w, L, S)
+            (x, x, end_w, S, S)
+  (y, w) -> (y, w, left_w, L, S)
+            (y, y, end_w, S, S)
+  (z, w) -> (z, w, left_w, L, S)
+            (z, z, end_w, S, S)
+  (a, b) -> (a, b, left_w, L, S)
+
+end_w:
+  (w, w) -> (w, w, cross_w, S, S)
+            (w, w, scan, S, S)
+  (x, x) -> (x, w, cross_w, S, S)
+            (x, x, scan, S, S)
+  (y, y) -> (y, w, cross_w, S, S)
+            (y, y, scan, S, S)
+  (z, z) -> (z, w, cross_w, S, S)
+            (z, z, scan, S, S)
+  (a, b) -> (a, b, end_w, S, S)
+
+# Remember the old vertex x; only the matching endpoint attaches to scan.
+left_x:
+  (x, x) -> (x, x, scan, S, S)
+            (x, x, cross_x, R, S)
+  (a, b) -> (a, b, cross_x, R, S)
+
+cross_x:
+  (start, b) -> (start, b, cross_x, S, S)
+  (w, x) -> (w, x, left_x, L, S)
+            (w, w, end_x, S, S)
+  (x, x) -> (x, x, left_x, L, S)
+            (x, x, end_x, S, S)
+  (y, x) -> (y, x, left_x, L, S)
+            (y, y, end_x, S, S)
+  (z, x) -> (z, x, left_x, L, S)
+            (z, z, end_x, S, S)
+  (a, b) -> (a, b, left_x, L, S)
+
+end_x:
+  (w, w) -> (w, x, cross_x, S, S)
+            (w, w, scan, S, S)
+  (x, x) -> (x, x, cross_x, S, S)
+            (x, x, scan, S, S)
+  (y, y) -> (y, x, cross_x, S, S)
+            (y, y, scan, S, S)
+  (z, z) -> (z, x, cross_x, S, S)
+            (z, z, scan, S, S)
+  (a, b) -> (a, b, end_x, S, S)
+
+# Remember the old vertex y; only the matching endpoint attaches to scan.
+left_y:
+  (y, y) -> (y, y, scan, S, S)
+            (y, y, cross_y, R, S)
+  (a, b) -> (a, b, cross_y, R, S)
+
+cross_y:
+  (start, b) -> (start, b, cross_y, S, S)
+  (w, y) -> (w, y, left_y, L, S)
+            (w, w, end_y, S, S)
+  (x, y) -> (x, y, left_y, L, S)
+            (x, x, end_y, S, S)
+  (y, y) -> (y, y, left_y, L, S)
+            (y, y, end_y, S, S)
+  (z, y) -> (z, y, left_y, L, S)
+            (z, z, end_y, S, S)
+  (a, b) -> (a, b, left_y, L, S)
+
+end_y:
+  (w, w) -> (w, y, cross_y, S, S)
+            (w, w, scan, S, S)
+  (x, x) -> (x, y, cross_y, S, S)
+            (x, x, scan, S, S)
+  (y, y) -> (y, y, cross_y, S, S)
+            (y, y, scan, S, S)
+  (z, z) -> (z, y, cross_y, S, S)
+            (z, z, scan, S, S)
+  (a, b) -> (a, b, end_y, S, S)
+
+# Remember the old vertex z; only the matching endpoint attaches to scan.
+left_z:
+  (z, z) -> (z, z, scan, S, S)
+            (z, z, cross_z, R, S)
+  (a, b) -> (a, b, cross_z, R, S)
+
+cross_z:
+  (start, b) -> (start, b, cross_z, S, S)
+  (w, z) -> (w, z, left_z, L, S)
+            (w, w, end_z, S, S)
+  (x, z) -> (x, z, left_z, L, S)
+            (x, x, end_z, S, S)
+  (y, z) -> (y, z, left_z, L, S)
+            (y, y, end_z, S, S)
+  (z, z) -> (z, z, left_z, L, S)
+            (z, z, end_z, S, S)
+  (a, b) -> (a, b, left_z, L, S)
+
+end_z:
+  (w, w) -> (w, z, cross_z, S, S)
+            (w, w, scan, S, S)
+  (x, x) -> (x, z, cross_z, S, S)
+            (x, x, scan, S, S)
+  (y, y) -> (y, z, cross_z, S, S)
+            (y, y, scan, S, S)
+  (z, z) -> (z, z, cross_z, S, S)
+            (z, z, scan, S, S)
+  (a, b) -> (a, b, end_z, S, S)
