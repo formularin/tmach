@@ -30,7 +30,7 @@ PyVis script (the terminal simulator does not need this dependency):
 
 ```sh
 python -m pip install -r requirements-visualize.txt
-python visualize.py example.tmach 11 --open
+python visualize.py examples/exponential.tmach 11 --open
 ```
 
 This writes `configuration_graph.html`; you can also open that file manually.
@@ -47,7 +47,7 @@ can be infinite. Yellow nodes have omitted successors; the page reports whether
 the graph is complete. Increase the limits or choose an output path with:
 
 ```sh
-python visualize.py example.tmach 11 --max-nodes 2000 --max-depth 200 -o example-graph.html
+python visualize.py examples/exponential.tmach 11 --max-nodes 2000 --max-depth 200 -o example-graph.html
 ```
 
 The HTML embeds the graph library so the visualization works offline.
@@ -176,7 +176,7 @@ only `(0, 0)`, `(1, 1)`, `(_, _)`, and `(start, start)`.
 
 ### Example
 
-`example.tmach` accepts every input and populates the second tape with $2^k$ ones,
+`examples/exponential.tmach` accepts every input and populates the second tape with $2^k$ ones,
 where $k$ is the length of the input:
 
 ```
@@ -243,7 +243,7 @@ and the screen is cleared on each redraw. When stdin is a pipe, input falls back
 to one line per key and the screen is not cleared, which makes runs scriptable:
 
 ```
-printf 'n\nn\nn\nq\n' | python tmach.py example.tmach 11
+printf 'n\nn\nn\nq\n' | python tmach.py examples/exponential.tmach 11
 ```
 
 Ctrl-C and Ctrl-D exit the same way `q` does. The view auto-sizes to the terminal

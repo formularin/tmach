@@ -4,7 +4,7 @@
 Reads a machine description (see README.md for the format), runs it on an input
 string, and lets you step forwards and backwards through the configurations.
 
-    python tmach.py example.tmach 1011
+    python tmach.py examples/exponential.tmach 1011
 """
 
 from __future__ import annotations

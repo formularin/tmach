@@ -1,0 +1,58 @@
+# Computes whether there is a path from w to z in an undirected 4-node graph.
+# This NTM is symmetric: a transition from configuration A to configuration B
+# implies a transition from configuration B to configuration A (except for
+# the first and last transitions).
+#
+# The input is given by an edge list with edges separated by underscores on
+# both sides, terminated with 's'. For example, the following is a
+# representation of the graph with edges (w, x), (x, y), and (y, z):
+# _wx_xy_yz_s
+
+
+alphabet: w,x,y,z,s,_  # s indicates end of input
+
+main:
+  (start, start) -> (start, start, main,      R, R)
+  (_, _) -> (_, w, left_scan, S, S)
+
+left_scan:
+  (a, z) -> (a, z, acc, S, S)
+            (a, _, left_blank, S, S)
+  (s, a) -> (s, a, right_scan, L, S)
+            (s, a, left_scan, L, S)
+  (_, w) -> (_, _, main, S, S)
+            (_, w, right_scan, L, S)
+            (_, w, left_scan, R, S)
+  (_, a) -> (_, a, right_scan, L, S)
+            (_, a, left_scan, R, S)
+  (a, a) -> (a, _, left_blank, S, S)
+            (a, a, right_scan, R, S)
+            (a, a, right_scan, L, S)
+            (a, a, left_scan, L, S)
+  (a, b) -> (a, b, right_scan, R, S)
+            (a, b, right_scan, L, S)
+            (a, b, left_scan, L, S)
+
+right_scan:
+  (a, z) -> (a, z, acc, S, S)
+            (a, _, right_blank, S, S)
+  (start, a) -> (start, a, left_scan, R, S)
+                (start, a, right_scan, R, S)
+  (_, a) -> (_, a, right_scan, L, S)
+            (_, a, left_scan, R, S)
+  (a, a) -> (a, _, right_blank, S, S)
+            (a, a, right_scan, R, S)
+            (a, a, left_scan, R, S)
+            (a, a, left_scan, L, S)
+  (a, b) -> (a, b, right_scan, R, S)
+            (a, b, left_scan, R, S)
+            (a, b, left_scan, L, S)
+
+left_blank:
+  (a, _) -> (a, a, left_scan, S, S)
+            (a, _, right_blank, R, S)
+
+right_blank:
+  (a, _) -> (a, a, right_scan, S, S)
+            (a, _, left_blank, L, S)
+

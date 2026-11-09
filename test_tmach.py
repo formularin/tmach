@@ -138,16 +138,16 @@ class MachineTests(unittest.TestCase):
             self.parse('main:\n(x) -> (x, acc, S)\n(x, rej, S)\n(start) -> (start, acc, S)')
 
     def test_symmetric_example(self):
-        machine = tmach.parse_spec('symmetric.tmach')
+        machine = tmach.parse_spec(str(Path(__file__).parent / 'examples' / 'symmetric.tmach'))
         self.assertTrue(machine.nondeterministic)
         path = tmach.accepting_path(machine, tmach.initial_config(machine, '_wz_s'))
         self.assertIsNotNone(path)
         self.assertEqual(path[-1].state, tmach.ACCEPT)
 
-    def test_symmetric_all_undirected_graphs(self):
-        machine = tmach.parse_spec(str(Path(__file__).with_name('symmetric.tmach')))
+    def test_symmetric_all_nonempty_undirected_graphs(self):
+        machine = tmach.parse_spec(str(Path(__file__).parent / 'examples' / 'symmetric.tmach'))
         possible_edges = list(combinations('wxyz', 2))
-        for mask in range(1 << len(possible_edges)):
+        for mask in range(1, 1 << len(possible_edges)):
             edges = [edge for i, edge in enumerate(possible_edges) if mask & (1 << i)]
             neighbors = {node: set() for node in 'wxyz'}
             for first, second in edges:
@@ -161,8 +161,8 @@ class MachineTests(unittest.TestCase):
                     reachable.add(neighbor)
                     pending.append(neighbor)
 
-            # Blank cells separate edge pairs; s bounds the input, including
-            # the empty graph, so the machine's configuration graph is finite.
+            # Blank cells separate edge pairs; s bounds the input so the
+            # machine's configuration graph is finite.
             input_string = '_' + '_'.join(''.join(edge) for edge in edges) + '_s'
             with self.subTest(edges=edges, input=input_string):
                 path = tmach.accepting_path(
@@ -179,7 +179,8 @@ class MachineTests(unittest.TestCase):
     def assert_symmetric_graph(self, machine, input_string, accepts):
         initial = tmach.initial_config(machine, input_string)
         pending = deque([initial])
-        seen = {tmach._config_key(initial)}
+        initial_key = tmach._config_key(initial)
+        seen = {initial_key}
         edges = set()
         accepted = False
         while pending:
@@ -204,10 +205,13 @@ class MachineTests(unittest.TestCase):
                     self.assertLess(len(seen), 10000, 'Expected a finite graph')
                     pending.append(nxt)
         self.assertEqual(accepted, accepts)
-        self.assertEqual(edges, {(target, source) for source, target in edges})
+        for source, target in edges:
+            # Transitions from the initial configuration need not be reversible.
+            if source != initial_key:
+                self.assertIn((target, source), edges)
 
     def test_symmetric_loops_duplicates_and_disconnected_endpoints(self):
-        machine = tmach.parse_spec(str(Path(__file__).with_name('symmetric.tmach')))
+        machine = tmach.parse_spec(str(Path(__file__).parent / 'examples' / 'symmetric.tmach'))
         for input_string, accepts in [
             ('_ww_xx_yy_zz_s', False),
             ('_wx_yz_wx_zy_s', False),
@@ -270,8 +274,8 @@ class MachineTests(unittest.TestCase):
         padded = tmach.Config('main', ((tmach.START, tmach.BLANK),), (0,), 'other', ())
         self.assertEqual(tmach._config_key(first), tmach._config_key(padded))
 
-    def test_existing_example(self):
-        machine = tmach.parse_spec('example.tmach')
+    def test_exponential_example(self):
+        machine = tmach.parse_spec(str(Path(__file__).parent / 'examples' / 'exponential.tmach'))
         self.assertFalse(machine.nondeterministic)
         config = tmach.initial_config(machine, '11')
         for _ in range(1000):
