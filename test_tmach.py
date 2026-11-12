@@ -260,6 +260,27 @@ class MachineTests(unittest.TestCase):
             self.assertEqual(tmach.main(['unused', '__a']), 0)
             run.assert_called_once_with(machine, '__a')
 
+    def test_punctuation_input_symbols(self):
+        for symbol in (':', '\\', '-'):
+            with self.subTest(symbol=symbol):
+                machine = self.parse(
+                    f'alphabet: {symbol}\n'
+                    'main:\n(start) -> (start, scan, R)\n'
+                    f'scan:\n({symbol}) -> ({symbol}, acc, S)'
+                )
+                self.assertEqual(machine.alphabet, (symbol,))
+                config = tmach.initial_config(machine, symbol)
+                config = tmach.step(machine, tmach.step(machine, config))
+                self.assertEqual(config.state, tmach.ACCEPT)
+                self.assertEqual(config.tapes[0][1], symbol)
+
+    def test_nonprinting_and_display_reserved_symbols_rejected(self):
+        for symbol in ('>', '\x00', '\x07', '\x1b', '\x7f', '\u200b'):
+            with self.subTest(symbol=repr(symbol)), self.assertRaisesRegex(
+                tmach.TMError, 'invalid input alphabet symbol'
+            ):
+                self.parse(f'alphabet: {symbol}\nmain:\n(start) -> (start, acc, S)')
+
     def test_invalid_specs(self):
         for text in ['alphabet: start', 'alphabet: a, a']:
             with self.subTest(text=text), self.assertRaises(tmach.TMError):

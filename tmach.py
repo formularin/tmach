@@ -117,8 +117,11 @@ def parse_spec(path: str) -> Machine:
         if len(set(alphabet)) != len(alphabet):
             raise TMError(f"{path}:{line_no}: duplicate input alphabet symbol")
         for symbol in alphabet:
-            if symbol == START or len(symbol) != 1 or symbol.isspace() or symbol in "(),:>\\":
-                raise TMError(f"{path}:{line_no}: invalid input alphabet symbol {symbol!r}; use single characters other than start")
+            if len(symbol) != 1 or not symbol.isprintable() or symbol.isspace() or symbol in "(),>":
+                raise TMError(
+                    f"{path}:{line_no}: invalid input alphabet symbol {symbol!r}; "
+                    "use single printable, non-whitespace characters other than '(', ')', ',', or '>'"
+                )
     literals = frozenset(alphabet) | {BLANK, START}
     order, pending, first = _split_into_states(path, lines)
     num_tapes, arity_line = _infer_num_tapes(path, first)
